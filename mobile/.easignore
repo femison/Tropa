@@ -1,0 +1,26 @@
+# Что не загружать в облачную сборку EAS.
+# Это копия .gitignore, но БЕЗ строки .env*.local: файл .env.local с ключом Яндекс.Карт
+# должен попасть в сборку, иначе в APK будет карта OSM вместо Яндекса.
+
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+android/
+ios/
+.kotlin/
+.metro-health-check*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+*.tsbuildinfo
+.claude/
