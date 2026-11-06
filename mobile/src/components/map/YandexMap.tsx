@@ -41,7 +41,7 @@ function buildHtml(apiKey: string) {
 </head><body><div id="map"></div>
 <script>
 var C = ${JSON.stringify({ street: colors.street, walked: colors.walked, track: colors.track, quest: colors.quest, park: colors.parkFill, parkCaptured: colors.parkCapturedFill })};
-var map, gray, walked, track, quest, me, parks, places, options, pressTimer = null;
+var map, gray, walked, track, quest, me, parks, places, options, photos, photoLayout, pressTimer = null;
 var lineOpts = function(color, width, z){ return { strokeColor: color, strokeWidth: width, strokeOpacity: 0.95, zIndex: z, cursor: 'pointer' }; };
 
 function addLines(coll, list, color, width, z){
@@ -69,6 +69,18 @@ window.tropa = {
         cup.events.add('click', function(){ post({type:'park', key: pk.k}); });
         parks.add(cup);
       }
+    });
+  },
+  setPhotos: function(list){
+    photos.removeAll();
+    list.forEach(function(ph){
+      var pm = new ymaps.Placemark(ph.c, { img: ph.t }, {
+        iconLayout: photoLayout,
+        iconShape: { type: 'Circle', coordinates: [0, 0], radius: 24 },
+        zIndex: 6
+      });
+      pm.events.add('click', function(){ post({type:'photo', id: ph.id}); });
+      photos.add(pm);
     });
   },
   setOptions: function(list){
@@ -114,7 +126,13 @@ ymaps.ready(function(){
   gray = new ymaps.GeoObjectCollection(); walked = new ymaps.GeoObjectCollection();
   track = new ymaps.GeoObjectCollection(); quest = new ymaps.GeoObjectCollection(); me = new ymaps.GeoObjectCollection();
   parks = new ymaps.GeoObjectCollection(); places = new ymaps.GeoObjectCollection(); options = new ymaps.GeoObjectCollection();
-  map.geoObjects.add(parks).add(gray).add(walked).add(track).add(quest).add(places).add(options).add(me);
+  photos = new ymaps.GeoObjectCollection();
+  // Круглая миниатюра фото с белой рамкой
+  photoLayout = ymaps.templateLayoutFactory.createClass(
+    '<div style="position:absolute;left:-24px;top:-24px;width:42px;height:42px;border-radius:50%;border:3px solid #fff;' +
+    'box-shadow:0 1px 4px rgba(0,0,0,.45);background:#ddd url($[properties.img]) center/cover no-repeat"></div>'
+  );
+  map.geoObjects.add(parks).add(gray).add(walked).add(track).add(quest).add(places).add(photos).add(options).add(me);
 
   map.events.add('click', function(){ post({type:'mapPress'}); });
   // Долгое нажатие: на телефоне contextmenu приходит не всегда, поэтому ещё и свой таймер.
@@ -188,6 +206,7 @@ const YandexMap = forwardRef<BaseMapHandle, Props>(function YandexMap(p, ref) {
       ),
     [call, p.parks],
   );
+  useEffect(() => call('setPhotos', p.photos.map((ph) => ({ id: ph.id, c: [ph.p.latitude, ph.p.longitude], t: ph.thumb }))), [call, p.photos]);
   useEffect(
     () =>
       call(
@@ -229,6 +248,7 @@ const YandexMap = forwardRef<BaseMapHandle, Props>(function YandexMap(p, ref) {
     else if (m.type === 'park') p.onParkPress(m.key);
     else if (m.type === 'place') p.onPlacePress(m.id);
     else if (m.type === 'questOption') p.onQuestPress(m.id);
+    else if (m.type === 'photo') p.onPhotoPress(m.id);
     else if (m.type === 'mapPress') p.onMapPress();
     else if (m.type === 'longPress') p.onLongPress({ latitude: m.lat, longitude: m.lon });
     else if (m.type === 'error') p.onError?.(m.message);

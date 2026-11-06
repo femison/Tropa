@@ -18,6 +18,13 @@ export type QuestRecord = {
   task: string;
   points: number;
   photoUri: string | null;
+  /** Миниатюра (data:image/jpeg;base64,…) для метки на карте. */
+  thumb?: string | null;
+  /** Где сделано фото — по этим координатам оно показывается на карте. */
+  lat?: number;
+  lon?: number;
+  /** Снимок сохранён в альбом «Тропа» в галерее. */
+  inGallery?: boolean;
 };
 
 const TITLES = ['Новичок', 'Пешеход', 'Исследователь', 'Следопыт', 'Краевед', 'Картограф', 'Легенда района'];

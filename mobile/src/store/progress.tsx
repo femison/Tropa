@@ -1,4 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import {
+  drainWalkQueue,
+  isBackgroundWalkRunning,
+  onWalkPoints,
+  startBackgroundWalk,
+  stopBackgroundWalk,
+} from '../services/backgroundWalk';
 import { SegmentIndex, matchStep } from '../services/matching';
 import { Area, buildArea, fetchRawArea, AREA_RADIUS, parkAtPoint } from '../services/osm';
 import {
@@ -16,6 +24,7 @@ import { ensureLocationPermission, getHere, watchWalk } from '../services/tracke
 import { QuestRecord, WalkRecord } from '../services/stats';
 import { fetchWeather, Weather } from '../services/weather';
 import { distance, LatLng } from '../utils/geo';
+import { makeThumbnail, savePhotoToAlbum } from '../services/photos';
 import { storage } from './storage';
 
 const WEATHER_TTL = 30 * 60 * 1000;
@@ -27,6 +36,8 @@ type Walk = {
   points: number;
   startedAt: number;
   percentBefore: number;
+  /** Запись идёт в фоне (уведомление в шторке, работает при выключенном экране). */
+  background: boolean;
 };
 
 export type ParkStat = { percent: number; visited: boolean; captured: boolean };
@@ -52,7 +63,7 @@ type Progress = {
   lastSummary: WalkRecord | null;
   dismissSummary: () => void;
   startWalk: () => Promise<void>;
-  stopWalk: () => void;
+  stopWalk: () => Promise<void>;
   /** Ручная точка трека — для проверки на эмуляторе (долгое нажатие на карту). */
   addSimulatedPoint: (p: LatLng) => void;
   reloadArea: () => Promise<void>;
@@ -226,82 +237,161 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
       saveTimer.current = null;
       storage.saveCovered(coveredRef.current);
       storage.savePoints(pointsRef.current);
+      const w = walkRef.current;
+      if (w) storage.saveActiveWalk({ ...w, track: w.track.slice(-2000) });
     }, 4000);
   }, []);
 
-  const onPoint = useCallback(
-    (p: LatLng) => {
-      setHere(p);
+  /** Обработать пачку точек трека разом: закрасить улицы, отметить парки, посчитать метры и очки. */
+  const processPoints = useCallback(
+    (pts: LatLng[]) => {
+      if (!pts.length) return;
       const idx = indexRef.current;
       const ar = areaRef.current;
-      const pk = ar ? parkAtPoint(ar, p) : null;
-      if (pk && !visitedParksRef.current.has(pk.key)) {
-        const next = new Set(visitedParksRef.current).add(pk.key);
-        visitedParksRef.current = next;
-        setVisitedParks(next);
-        storage.saveVisitedParks(next);
-      }
-      const prev = lastPointRef.current;
-      lastPointRef.current = p;
-      const step = prev ? distance(prev, p) : 0;
+      let parks = visitedParksRef.current;
+      let cov = coveredRef.current;
+      let prev = lastPointRef.current;
       let added = 0;
-      let gained = 0;
-      if (idx) {
-        const hit = matchStep(idx, prev, p);
-        const next = new Set(coveredRef.current);
-        for (const id of hit) if (!next.has(id)) {
-          next.add(id);
-          added++;
+      let meters = 0;
+      for (const p of pts) {
+        const pk = ar ? parkAtPoint(ar, p) : null;
+        if (pk && !parks.has(pk.key)) parks = new Set(parks).add(pk.key);
+        if (prev) {
+          const step = distance(prev, p);
+          if (step < 120) meters += step; // больше — скачок GPS или пропуск, не считаем
         }
-        if (added) {
-          coveredRef.current = next;
-          setCovered(next);
-          gained = added * (weatherRef.current?.isBad ? 2 : 1);
-          pointsRef.current += gained;
-          setPoints(pointsRef.current);
-          scheduleSave();
+        if (idx) {
+          for (const id of matchStep(idx, prev, p)) {
+            if (cov.has(id)) continue;
+            if (cov === coveredRef.current) cov = new Set(cov);
+            cov.add(id);
+            added++;
+          }
         }
+        prev = p;
       }
-      setWalk((w) =>
-        w
-          ? {
-              ...w,
-              track: [...w.track, p],
-              newSegments: w.newSegments + added,
-              points: w.points + gained,
-              meters: w.meters + (step < 120 ? step : 0),
-            }
-          : w,
-      );
+      lastPointRef.current = prev;
+      setHere(prev);
+      if (parks !== visitedParksRef.current) {
+        visitedParksRef.current = parks;
+        setVisitedParks(parks);
+        storage.saveVisitedParks(parks);
+      }
+      const gained = added * (weatherRef.current?.isBad ? 2 : 1);
+      if (added) {
+        coveredRef.current = cov;
+        setCovered(cov);
+        pointsRef.current += gained;
+        setPoints(pointsRef.current);
+      }
+      const w = walkRef.current;
+      if (w) {
+        const next: Walk = {
+          ...w,
+          track: [...w.track, ...pts],
+          newSegments: w.newSegments + added,
+          points: w.points + gained,
+          meters: w.meters + meters,
+        };
+        walkRef.current = next;
+        setWalk(next);
+      }
+      scheduleSave();
     },
     [scheduleSave],
   );
 
+  /** Забрать точки, которые фоновая запись накопила (в т. ч. пока экран был выключен). */
+  const draining = useRef(false);
+  const drain = useCallback(async () => {
+    if (draining.current || !walkRef.current || !indexRef.current) return;
+    draining.current = true;
+    try {
+      const q = await drainWalkQueue();
+      processPoints(q.map(([latitude, longitude]) => ({ latitude, longitude })));
+    } finally {
+      draining.current = false;
+    }
+  }, [processPoints]);
+
+  // Новые точки из фоновой задачи, возврат в приложение, готовность района — во всех случаях забираем очередь
+  useEffect(() => onWalkPoints(() => void drain()), [drain]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && void drain());
+    return () => sub.remove();
+  }, [drain]);
+  useEffect(() => {
+    if (index && walk) void drain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, walk?.startedAt]);
+
+  // Восстановление прогулки, если приложение закрыли или система выгрузила его во время записи
+  useEffect(() => {
+    (async () => {
+      const saved = await storage.loadActiveWalk();
+      const running = await isBackgroundWalkRunning();
+      if (saved) {
+        walkRef.current = saved;
+        lastPointRef.current = saved.track[saved.track.length - 1] ?? null;
+        setWalk(saved);
+        // Фоновая запись могла остановиться (например, после перезагрузки телефона) — запускаем снова
+        if (saved.background && !running) {
+          const r = await startBackgroundWalk().catch(() => ({ ok: false as const, reason: '' }));
+          if (!r.ok) stopWatchRef.current = await watchWalk((p) => processPoints([p]));
+        } else if (!saved.background) {
+          stopWatchRef.current = await watchWalk((p) => processPoints([p]));
+        }
+      } else if (running) {
+        await stopBackgroundWalk(); // осиротевшая запись без прогулки
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startWalk = useCallback(async () => {
-    if (stopWatchRef.current) return;
+    if (walkRef.current) return;
     if (!(await ensureLocationPermission())) {
       setStatus('Нет доступа к геолокации.');
       return;
     }
+    let background = false;
+    try {
+      const r = await startBackgroundWalk();
+      background = r.ok;
+      if (!r.ok) setStatus(`Прогулка пишется только при открытом приложении: ${r.reason}.`);
+    } catch (e) {
+      setStatus('Фоновая запись недоступна: ' + String((e as Error).message ?? e));
+    }
     lastPointRef.current = null;
     setLastSummary(null);
-    setWalk({
+    const w: Walk = {
       track: [],
       newSegments: 0,
       meters: 0,
       points: 0,
       startedAt: Date.now(),
       percentBefore: percentRef.current,
-    });
-    stopWatchRef.current = await watchWalk(onPoint);
-  }, [onPoint]);
+      background,
+    };
+    walkRef.current = w;
+    setWalk(w);
+    storage.saveActiveWalk(w);
+    // Без фона (Expo Go или запрет «Разрешить всегда») — пишем, пока приложение открыто
+    if (!background) stopWatchRef.current = await watchWalk((p) => processPoints([p]));
+  }, [processPoints]);
 
-  const stopWalk = useCallback(() => {
+  const stopWalk = useCallback(async () => {
     stopWatchRef.current?.();
     stopWatchRef.current = null;
+    await stopBackgroundWalk().catch(() => undefined);
+    // Последние точки, которые успели накопиться
+    const q = await drainWalkQueue();
+    processPoints(q.map(([latitude, longitude]) => ({ latitude, longitude })));
     lastPointRef.current = null;
     const w = walkRef.current;
+    walkRef.current = null;
     setWalk(null);
+    storage.clearActiveWalk();
     if (w && (w.meters >= 20 || w.newSegments > 0)) {
       const rec: WalkRecord = {
         startedAt: w.startedAt,
@@ -320,8 +410,9 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     }
     storage.saveCovered(coveredRef.current);
     storage.savePoints(pointsRef.current);
-  }, []);
+  }, [processPoints]);
 
+  // Закрытие экрана не останавливает фоновую запись — только запись «при открытом приложении»
   useEffect(() => () => stopWatchRef.current?.(), []);
 
   const reloadArea = useCallback(async () => {
@@ -382,7 +473,13 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
           };
         }
       }
-      const done = { ...quest, completedAt: Date.now(), photoUri };
+      // Фото — в альбом «Тропа» в галерее (не пропадёт из кэша камеры) и миниатюра для карты
+      const [galleryUri, thumb] = await Promise.all([
+        savePhotoToAlbum(photoUri).catch(() => null),
+        makeThumbnail(photoUri).catch(() => null),
+      ]);
+      const finalUri = galleryUri ?? photoUri;
+      const done = { ...quest, completedAt: Date.now(), photoUri: finalUri };
       updateQuest(done);
       pointsRef.current += o.points;
       setPoints(pointsRef.current);
@@ -394,20 +491,29 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
         task: o.task,
         points: o.points,
         difficulty: o.difficulty,
-        photoUri,
+        photoUri: finalUri,
+        thumb,
+        lat: p.latitude,
+        lon: p.longitude,
+        inGallery: !!galleryUri,
       };
       setQuestHistory((h) => {
         const next = [rec, ...h];
         storage.saveQuestHistory(next);
         return next;
       });
-      return { ok: true, message: `Квест выполнен! +${o.points} очков` };
+      return {
+        ok: true,
+        message: `Квест выполнен! +${o.points} очков` + (galleryUri ? `
+Фото сохранено в альбом «Тропа».` : `
+Фото не удалось сохранить в галерею — нет разрешения.`),
+      };
     },
     [quest, area, updateQuest],
   );
 
   const resetAll = useCallback(async () => {
-    stopWalk();
+    await stopWalk();
     await storage.reset();
     const empty = new Set<string>();
     coveredRef.current = empty;
@@ -441,7 +547,7 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     dismissSummary: () => setLastSummary(null),
     startWalk,
     stopWalk,
-    addSimulatedPoint: onPoint,
+    addSimulatedPoint: (p: LatLng) => processPoints([p]),
     reloadArea,
     completeQuest,
     chooseQuest,

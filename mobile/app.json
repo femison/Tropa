@@ -6,7 +6,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Тропа закрашивает улицы, по которым вы прошли, и проверяет квесты по геолокации."
+          "locationWhenInUsePermission": "Тропа закрашивает улицы, по которым вы прошли, и проверяет квесты по геолокации.",
+          "locationAlwaysAndWhenInUsePermission": "Тропа записывает прогулку, даже когда экран выключен, чтобы закрасить все пройденные улицы.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
@@ -14,6 +17,16 @@
         {
           "cameraPermission": "Камера нужна, чтобы сфотографировать место квеста.",
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Тропа сохраняет фото выполненных квестов в альбом «Тропа» в галерее.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": [
+            "photo"
+          ]
         }
       ],
       [
@@ -27,7 +40,7 @@
         }
       ]
     ],
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -36,7 +49,7 @@
     },
     "android": {
       "package": "ru.tropa.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -46,7 +59,11 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {

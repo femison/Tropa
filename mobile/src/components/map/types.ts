@@ -8,6 +8,8 @@ export type MapRun = { key: string; wayId: number; coords: LatLng[] };
 export type MapPark = { key: string; pieces: LatLng[][]; center: LatLng; captured: boolean };
 /** Вариант квеста дня — метка на карте, по нажатию открывается карточка выбора. */
 export type MapQuestOption = { id: string; target: LatLng; color: string; text: string; chosen: boolean };
+/** Фото выполненного квеста — круглая миниатюра на месте съёмки. */
+export type MapPhoto = { id: string; p: LatLng; thumb: string };
 /** Место рядом с целью квеста. */
 export type MapPlace = { id: string; p: LatLng; relevant: boolean };
 
@@ -17,6 +19,7 @@ export type BaseMapProps = {
   parks: MapPark[];
   places: MapPlace[];
   questOptions: MapQuestOption[];
+  photos: MapPhoto[];
   track: LatLng[];
   here: LatLng | null;
   /** Цель квеста; street — улица сложного квеста, park — парк паркового квеста. */
@@ -26,6 +29,7 @@ export type BaseMapProps = {
   onParkPress: (key: string) => void;
   onPlacePress: (id: string) => void;
   onQuestPress: (id: string) => void;
+  onPhotoPress: (id: string) => void;
   onMapPress: () => void;
   /** Карта не смогла загрузиться (например, неверный ключ). */
   onError?: (message: string) => void;

@@ -3,6 +3,18 @@ import { RawArea } from '../services/osm';
 import { Quest } from '../services/quest';
 import { QuestRecord, WalkRecord } from '../services/stats';
 import { Weather } from '../services/weather';
+import { LatLng } from '../utils/geo';
+
+/** Незавершённая прогулка — переживает закрытие приложения. */
+export type StoredWalk = {
+  track: LatLng[];
+  newSegments: number;
+  meters: number;
+  points: number;
+  startedAt: number;
+  percentBefore: number;
+  background: boolean;
+};
 
 /** Прогресс — то, что стирает «Сбросить прогресс». */
 const KEYS = {
@@ -14,6 +26,7 @@ const KEYS = {
   walks: 'tropa.walks.v1',
   quests: 'tropa.quests.v1',
   parks: 'tropa.visitedParks.v1',
+  activeWalk: 'tropa.activeWalk.v1',
 } as const;
 
 /** Настройки и онбординг сбросом прогресса не трогаем. */
@@ -57,6 +70,9 @@ export const storage = {
   saveQuestHistory: (q: QuestRecord[]) => write(KEYS.quests, q),
   loadVisitedParks: async () => new Set((await read<string[]>(KEYS.parks)) ?? []),
   saveVisitedParks: (s: Set<string>) => write(KEYS.parks, [...s]),
+  loadActiveWalk: () => read<StoredWalk>(KEYS.activeWalk),
+  saveActiveWalk: (w: StoredWalk) => write(KEYS.activeWalk, w),
+  clearActiveWalk: () => AsyncStorage.removeItem(KEYS.activeWalk).catch(() => undefined),
   reset: () => AsyncStorage.multiRemove(Object.values(KEYS)),
 
   loadSettings: async (): Promise<Settings> => (await read<Settings>(SETTINGS_KEY)) ?? { mapProvider: null },

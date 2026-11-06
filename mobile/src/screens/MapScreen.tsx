@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import OsmMap from '../components/map/OsmMap';
-import { BaseMapHandle, MapPark, MapPlace, MapQuestOption, MapRun, MapStreet } from '../components/map/types';
+import { BaseMapHandle, MapPark, MapPhoto, MapPlace, MapQuestOption, MapRun, MapStreet } from '../components/map/types';
 import YandexMap from '../components/map/YandexMap';
 import WalkSummary from '../components/WalkSummary';
 import { YANDEX_MAPS_KEY } from '../config';
@@ -59,6 +59,7 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
   const [parkKey, setParkKey] = useState<string | null>(null);
   const [placeId, setPlaceId] = useState<string | null>(null);
   const [questSheet, setQuestSheet] = useState<Difficulty | null>(null);
+  const [photoId, setPhotoId] = useState<string | null>(null);
   const {
     ready,
     status,
@@ -78,6 +79,7 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
     addSimulatedPoint,
     reloadArea,
     chooseQuest,
+    questHistory,
   } = useProgress();
 
   const byId = useMemo(() => new Map((area?.segments ?? []).map((s) => [s.id, s])), [area]);
@@ -110,6 +112,16 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
     const park = o.parkKey ? (area?.parks.find((p) => p.key === o.parkKey)?.pieces ?? null) : null;
     return { target: o.target, radius: QUEST_RADIUS, street, park };
   }, [quest, sheetOption, byId, area]);
+
+  // Фото выполненных квестов — на месте съёмки
+  const photos = useMemo<MapPhoto[]>(
+    () =>
+      questHistory
+        .filter((q) => q.lat != null && q.lon != null && q.thumb)
+        .map((q) => ({ id: String(q.completedAt), p: { latitude: q.lat!, longitude: q.lon! }, thumb: q.thumb! })),
+    [questHistory],
+  );
+  const photo = photoId ? (questHistory.find((q) => String(q.completedAt) === photoId) ?? null) : null;
 
   // Метки вариантов квеста дня — выбирать можно прямо на карте
   const questOptions = useMemo<MapQuestOption[]>(() => {
@@ -192,7 +204,16 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
     parks,
     places,
     questOptions,
+    photos,
+    onPhotoPress: (id: string) => {
+      setPhotoId(id);
+      setQuestSheet(null);
+      setStreetId(null);
+      setParkKey(null);
+      setPlaceId(null);
+    },
     onQuestPress: (id: string) => {
+      setPhotoId(null);
       setQuestSheet(id as Difficulty);
       setStreetId(null);
       setParkKey(null);
@@ -218,6 +239,7 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
       setQuestSheet(null);
     },
     onMapPress: () => {
+      setPhotoId(null);
       setStreetId(null);
       setParkKey(null);
       setPlaceId(null);
@@ -324,6 +346,24 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
 
       {/* Нижняя панель */}
       <View style={styles.bottom}>
+        {photo && (
+          <View style={styles.sheet}>
+            <View style={styles.row}>
+              <Text style={[styles.sheetTitle, styles.flex]} numberOfLines={1}>
+                📷 {photo.streetName ?? 'Квест'}
+              </Text>
+              <Pressable onPress={() => setPhotoId(null)} hitSlop={10}>
+                <Text style={styles.close}>✕</Text>
+              </Pressable>
+            </View>
+            {photo.photoUri && <Image source={{ uri: photo.photoUri }} style={styles.photoBig} resizeMode="cover" />}
+            <Text style={styles.qTask}>{photo.task}</Text>
+            <Text style={styles.muted}>
+              {new Date(photo.completedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} · +{photo.points} очков
+              {photo.inGallery ? ' · в альбоме «Тропа»' : ''}
+            </Text>
+          </View>
+        )}
         {sheetOption && quest && (
           <QuestSheet
             o={sheetOption}
@@ -419,7 +459,11 @@ export default function MapScreen({ focus }: { focus: LatLng | null }) {
               <WalkStat value={`+${walk.newSegments}`} label="отрезков" />
               <WalkStat value={`+${walk.points}`} label="очков" />
             </View>
-            <Text style={styles.hint}>Держите приложение открытым. Долгое нажатие на карту — тестовая точка.</Text>
+            <Text style={styles.hint}>
+              {walk.background
+                ? '🔔 Запись идёт в фоне — можно выключить экран и убрать телефон.'
+                : 'Держите приложение открытым: фоновая запись не разрешена.'}
+            </Text>
           </View>
         )}
         <Pressable
@@ -559,6 +603,7 @@ const styles = StyleSheet.create({
   qButton: { marginTop: 10, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   qChosen: { color: colors.good, fontWeight: '700' },
   qCancel: { color: colors.muted, fontWeight: '600' },
+  photoBig: { width: '100%', aspectRatio: 4 / 3, borderRadius: 12, marginTop: 8, backgroundColor: colors.border },
   reviews: { marginTop: 10, borderRadius: 12, paddingVertical: 10, alignItems: 'center', backgroundColor: '#FFDB4D' },
   reviewsText: { fontWeight: '700', color: colors.text },
   walkStats: { flexDirection: 'row' },

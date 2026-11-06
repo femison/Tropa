@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import MapView, { Circle, Marker, Polygon, Polyline, UrlTile } from 'react-native-maps';
 import { colors } from '../../theme';
 import { BaseMapHandle, BaseMapProps } from './types';
@@ -89,6 +89,20 @@ const OsmMap = forwardRef<BaseMapHandle, BaseMapProps>(function OsmMap(p, ref) {
       {p.track.length > 1 && (
         <Polyline coordinates={p.track} strokeColor={colors.track} strokeWidth={3} zIndex={3} lineDashPattern={[6, 6]} />
       )}
+      {p.photos.map((ph) => (
+        <Marker
+          key={`ph-${ph.id}`}
+          coordinate={ph.p}
+          anchor={{ x: 0.5, y: 0.5 }}
+          zIndex={5}
+          onPress={() => {
+            lineTap.current = Date.now();
+            p.onPhotoPress(ph.id);
+          }}
+        >
+          <Image source={{ uri: ph.thumb }} style={osm.photo} />
+        </Marker>
+      ))}
       {p.questOptions.map((q) => (
         <Marker
           key={`q-${q.id}`}
@@ -142,6 +156,7 @@ const osm = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 2, borderColor: '#fff' },
   chosen: { borderColor: colors.quest, borderWidth: 3 },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  photo: { width: 44, height: 44, borderRadius: 22, borderWidth: 3, borderColor: '#fff' },
 });
 
 export default OsmMap;
